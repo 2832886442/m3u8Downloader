@@ -1,0 +1,9 @@
+[package]
+name = "m3u8_downloader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rayon = "1.7"
+regex = "1.10"
+chrono = "0.4"
