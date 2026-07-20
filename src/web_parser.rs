@@ -70,7 +70,9 @@ pub fn mrds_parser(url: &str) -> Result<(), Box<dyn Error>> {
                                     let title = node
                                         .get("data-video_title")
                                         .unwrap_or("未知标题".into())
-                                        .replace("/", ".");
+                                        .replace("/", ".")
+                                        .trim()
+                                        .to_string();
 
                                     // 提取 URL
                                     let mut video_url_opt = None;
