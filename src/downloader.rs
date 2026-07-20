@@ -13,13 +13,14 @@ const OUTPUT_DIR: &str = "./Downloads";
 
 /// 单个下载任务
 fn download_single(title: &str, url: &str, pb: ProgressBar) {
-    // 1. 【关键修复】初始状态使用隐藏的 Spinner，避免一开始显示 100% 或空白
+    // 1. 设置初始样式
     let spinner_style = ProgressStyle::default_spinner()
         .template("{msg:.bold} {spinner:.green} ⏳ 正在准备下载...")
         .unwrap();
     pb.set_style(spinner_style);
     pb.set_message(title.to_string());
-    // 将进度条设为隐藏状态，等待获取到真实长度后再显示
+
+    // 【关键修复】：初始状态直接设为 Hidden，防止在获取到真实进度前占用屏幕位置或闪烁
     pb.set_draw_target(ProgressDrawTarget::hidden());
 
     let mut child = Command::new(N_M3U8DL_CLI)
@@ -40,39 +41,36 @@ fn download_single(title: &str, url: &str, pb: ProgressBar) {
     let output_arc = Arc::new(Mutex::new(String::new()));
     let progress_regex = Regex::new(r"Progress:\s*(\d+)/(\d+)\s*\(([\d.]+)%\)").unwrap();
 
-    // 2. 提取闭包处理进度，使用 move 解决生命周期问题
+    // 2. 提取闭包处理进度
     let process_line = move |line: &str, output: &Arc<Mutex<String>>, pb: &ProgressBar| {
-        // 记录日志
         output.lock().unwrap().push_str(line);
         output.lock().unwrap().push('\n');
 
-        // 匹配进度
         if let Some(caps) = progress_regex.captures(line) {
             let downloaded: u64 = caps[1].parse().unwrap_or(0);
             let total: u64 = caps[2].parse().unwrap_or(0);
 
-            // 【核心修复】当获取到真实的总文件数，且进度条还在隐藏状态时，将其显示出来
+            // 【关键修复】：从 Hidden 切换到 Visible 的逻辑
             if total > 0 && pb.is_hidden() {
                 let bar_style = ProgressStyle::default_bar()
-                    .template(&format!(
-                        "{{msg:.bold}} [{{bar:30.cyan/blue}}] {{pos}}/{{len}} ({{percent}}%, ETA: {{eta}})"
-                    ))
+                    .template(
+                        "{msg:.bold} [{bar:30.cyan/blue}] {pos}/{len} ({percent}%, ETA: {eta})",
+                    )
                     .unwrap()
                     .progress_chars("=>-");
                 pb.set_style(bar_style);
                 pb.set_length(total);
-                // 将隐藏的目标切换为正常的终端输出
+                // 此时再将其挂载到标准输出，MultiProgress 会自动将其放入预留的正确位置
                 pb.set_draw_target(ProgressDrawTarget::stdout());
             }
 
-            // 更新当前已下载的文件数
             if total > 0 {
                 pb.set_position(downloaded);
             }
         }
     };
 
-    // 3. 逐字节读取 stdout
+    // 3. 逐字节读取 stdout (保持原有逻辑不变)
     let out_handle = {
         let output = output_arc.clone();
         let pb = pb.clone();
@@ -97,7 +95,6 @@ fn download_single(title: &str, url: &str, pb: ProgressBar) {
                 }
             }
 
-            // 处理缓冲区残留
             if !buf.is_empty() {
                 if let Ok(line) = String::from_utf8(buf) {
                     process_line(&line, &output, &pb);
@@ -124,7 +121,7 @@ fn download_single(title: &str, url: &str, pb: ProgressBar) {
     out_handle.join().unwrap();
     err_handle.join().unwrap();
 
-    // 5. 根据状态完成进度条
+    // 5. 完成进度条
     if status.success() {
         pb.finish_with_message(format!("{} ✔ 下载完成", title));
     } else {
@@ -144,8 +141,20 @@ pub fn start_download() {
 
     println!("🚀 开始下载任务...");
 
-    // 创建 MultiProgress 管理器，它负责协调多个进度条的显示，防止互相覆盖
+    // 创建 MultiProgress 管理器
     let multi = MultiProgress::new();
+
+    // 【核心修复】：在主线程中预先创建所有进度条并添加到 MultiProgress
+    // 这样做可以锁定每个进度条在屏幕上的垂直位置，防止多线程竞争导致的乱序
+    let progress_bars: Vec<ProgressBar> = titles
+        .iter()
+        .map(|_| {
+            // 初始化为一个占位用的进度条，长度为0或1均可，稍后在 download_single 中会重置
+            let pb = multi.add(ProgressBar::new(0));
+            pb.set_draw_target(ProgressDrawTarget::hidden()); // 初始全部隐藏，等解析出数据再显示
+            pb
+        })
+        .collect();
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(MAX_WORKERS)
@@ -154,12 +163,15 @@ pub fn start_download() {
 
     pool.install(|| {
         use rayon::prelude::*;
-        let pairs: Vec<(&String, &String)> = titles.iter().zip(urls.iter()).collect();
 
-        pairs.par_iter().for_each(|(title, url)| {
-            // 为每个任务创建一个独立的进度条，并交给 MultiProgress 管理
-            let pb = multi.add(ProgressBar::new(100));
-            download_single(title, url, pb);
-        });
+        // 使用 zip 将标题、URL和预创建的进度条绑定在一起
+        titles
+            .par_iter()
+            .zip(urls.par_iter())
+            .zip(progress_bars.par_iter())
+            .for_each(|((title, url), pb)| {
+                // clone 进度条以传入函数
+                download_single(title, url, pb.clone());
+            });
     });
 }

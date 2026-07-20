@@ -1,6 +1,6 @@
 [package]
 name = "m3u8_downloader"
-version = "0.1.0"
+version = "0.1.4"
 edition = "2021"
 
 [dependencies]
@@ -14,3 +14,4 @@ csv = "1.2"
 scraper = "0.19"
 url = "2.5.8"
 indicatif = "0.18.6"
+colored = "3.1.1"
