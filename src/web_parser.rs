@@ -9,7 +9,7 @@ use std::time::Duration;
 use url::Url;
 
 /// 解析视频页面，提取标题和 URL，生成 CSV
-pub fn mrds_parser(url: &str) -> Result<(), Box<dyn Error>> {
+pub fn parser1(url: &str) -> Result<(), Box<dyn Error>> {
     // 1. 优雅地处理 page_list 的返回结果
     let url_list = match page_list(url) {
         Ok(res) if !res.is_empty() => res,

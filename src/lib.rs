@@ -51,7 +51,7 @@ fn url_parser_csv() -> Result<(), Box<dyn Error>> {
     println!("{}", "⏳ 正在解析网页，请稍候...".yellow());
 
     // 4. 调用解析器
-    let res = web_parser::mrds_parser(&final_url);
+    let res: Result<(), Box<dyn Error>> = web_parser::parser1(&final_url);
 
     match res {
         Ok(_) => {
